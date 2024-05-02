@@ -1,0 +1,64 @@
+# OpenDID Config File
+
+# server config
+host: 0.0.0.0
+port: 3001
+basePath: ./srv
+production: false
+kiltEndpoint: peregrine
+
+# session config
+# contains the keyUri, naclSecretKey, naclPublicKey and sessionKey used to communicate with the identity extension
+session:
+  # key uri of the key agreement key of the verifiers DID
+  keyUri: did:kilt:4ognqvv7LkLZ3LvKJ8aeuNPPoZoJCaysugakDtnkMFXgBFSd#0xefe8cd980926f08b554483895a3ea5d2bd349677087f826eed178c7540278d4e
+  # nacl secret key of the key agreement key of the verifiers DID
+  naclSecretKey: "0xbc273881fb3835671cb2af220d9c3222596e00932f979b3ba3fd266fb10a3ea6"
+  # nacl public key of the key agreement key of the verifiers DID
+  naclPublicKey: "0x6e9f0287adc9b68480ab3b1528ea36548b0846c8c15719a239c2e34d1ce64621"
+  # session key used to encrypt the session data, needs to be the same on all instances
+  sessionKey: "0x18d00905a043d47534052db582a48f445f1fa9ef03b7860b5f64aee5c86612cd5028e305fe44439f87c6dc5daf80514668f3862636df688447f08cc6a2dee34c"
+  # time in seconds a session lasts as default of 60 minutes
+  sessionTtl: 3600
+
+# jwt config
+# contains the jwt config for the access and refresh tokens
+jwt:
+  tokenIssuer: did:kilt:4ognqvv7LkLZ3LvKJ8aeuNPPoZoJCaysugakDtnkMFXgBFSd
+  accessTokenLifetime: 60
+  accessTokenAudience: application
+  refreshTokenLifetime: 600
+  refreshTokenAudience: authentication
+  secretKey: "super-secret-jwt-secret"
+  publicKey: "super-secret-jwt-secret"
+  algorithm: HS256
+
+# well known DID
+wellKnownDid:
+  did: did:kilt:4ognqvv7LkLZ3LvKJ8aeuNPPoZoJCaysugakDtnkMFXgBFSd
+  origin: http://localhost:3001
+  keyUri: did:kilt:4ognqvv7LkLZ3LvKJ8aeuNPPoZoJCaysugakDtnkMFXgBFSd#0x624aa66dd3501172aa4ecb32d8dc626d662065bc57f8cdff7935f4f6dfaf072d
+  seed: "female kiss fun satisfy off matter awesome insect aerobic delay draft faculty//did//assertion//0"
+#   did: did:kilt:4rD95DJmaa24Z9vPMprZmys5jnn4snAtJA978MFqa6jekdio
+#   origin: "http://localhost:3001"
+#   keyUri: did:kilt:4rD95DJmaa24Z9vPMprZmys5jnn4snAtJA978MFqa6jekdio#0x9631ac50dbcce98a7a2acdfe19c433bf8e5fbce749f82ead4cc7ce2b4e086ae
+#   seed: "between ticket parade quote prevent cage benefit another divert double clever shield//did//assertion//0"
+
+# client configs
+clients:
+  example-client:
+    # credential requirements
+    # contains the credential requirements for the verifiers DID
+    # if the user provides ANY of the listed credentials, the login is successful
+    # w3n:socialkyc on spiritnet or w3n:attester on peregrine are added as example trustedAttesters for email CType
+    requirements:
+    #   - cTypeHash: "0x3291bb126e33b4862d421bfaa1d2f272e6cdfc4f96658988fbcffea8914bd9ac"
+    #     trustedAttesters: ["did:kilt:4pehddkhEanexVTTzWAtrrfo2R7xPnePpuiJLC7shQU894aY"]
+    #     requiredProperties: ["Email"]
+      - cTypeHash: "0xd7959ba72f840a8142b9e1543ca92ce3f5ae38348d25c0c50e10575d4dcc2aa6"
+        trustedAttesters: ["did:kilt:4rD95DJmaa24Z9vPMprZmys5jnn4snAtJA978MFqa6jekdio"]
+        requiredProperties: ["email"]
+    # valid redirect urls for this client
+    redirectUrls:
+      - http://localhost:1606/callback.html
+    checksDirectory: ./checks

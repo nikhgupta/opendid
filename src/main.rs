@@ -118,6 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .service(challenge_response_handler)
             .service(get_credential_requirements_handler)
             .service(post_credential_handler)
+            .service(post_token_handler)
             .service(refresh_handler)
             .service(well_known_did_config_handler)
             .service(login_with_did)

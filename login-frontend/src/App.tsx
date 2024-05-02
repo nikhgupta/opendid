@@ -34,6 +34,7 @@ export function App() {
       const extension = new FormData(form).get('extension') as string;
 
       const session = await getSession(kilt[extension]);
+      console.log(session);
 
       const credentialRequirements = await (
         await fetch('/api/v1/credentials', {
@@ -59,6 +60,8 @@ export function App() {
         },
         credentials: 'include',
       });
+
+      console.log(fetchCredential);
 
       if (fetchCredential.status >= 400) {
         const credentialResponseData = await fetchCredential.text();

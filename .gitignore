@@ -18,3 +18,4 @@ did-document.json
 package-lock.json
 **/.env
 nohup.out
+srv/
