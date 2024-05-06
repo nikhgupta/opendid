@@ -6,6 +6,7 @@ pub enum Error {
     OauthInvalidClientId,
     OauthInvalidRedirectUri,
     OauthNoSession,
+    OauthInvalidAuthorizationCode,
     SessionInsert,
     SessionGet,
     InvalidChallenge(&'static str),
@@ -32,6 +33,7 @@ impl std::fmt::Display for Error {
             Error::OauthNotConfigured => write!(f, "OAuth is not configured"),
             Error::OauthInvalidClientId => write!(f, "Invalid client_id"),
             Error::OauthInvalidRedirectUri => write!(f, "Invalid redirect_uri"),
+            Error::OauthInvalidAuthorizationCode => write!(f, "Invalid authorization code"),
             Error::SessionInsert => write!(f, "Failed to insert session"),
             Error::SessionGet => write!(f, "Failed to get session"),
             Error::InvalidChallenge(s) => write!(f, "Invalid challenge: {}", s),
@@ -60,6 +62,7 @@ impl From<Error> for actix_web::Error {
             Error::OauthNotConfigured
             | Error::OauthInvalidClientId
             | Error::OauthInvalidRedirectUri
+            | Error::OauthInvalidAuthorizationCode
             | Error::InvalidLightDid(_)
             | Error::InvalidDid(_)
             | Error::FailedToDecrypt

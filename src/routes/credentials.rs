@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::RwLock};
+use std::{
+    collections::HashMap,
+    sync::{RwLock, RwLockReadGuard},
+};
 
 use actix_session::Session;
 use actix_web::{get, post, web, HttpResponse};
@@ -7,9 +10,11 @@ use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::box_;
 use sp_core::crypto::Ss58Codec;
 
+use crate::{constants::AUTHORIZATION_CODE_PROPS, routes::authorize::validate_authorization_code};
+
 use crate::{
-    config::CredentialRequirement,
-    constants::OIDC_SESSION_KEY,
+    config::{ClientConfig, CredentialRequirement},
+    constants::{AUTHORIZATION_CODE_NAME, OIDC_SESSION_KEY},
     kilt::{self, parse_encryption_key_from_lightdid},
     messages::{EncryptedMessage, Message, MessageBody},
     routes::{error::Error, AuthorizeQueryParameters},
@@ -250,17 +255,51 @@ async fn post_credential_handler(
 
     log::info!("Credential checked, all good to go");
 
+    let authorization_code = session
+        .get::<String>(AUTHORIZATION_CODE_NAME)
+        .unwrap_or_default();
+
     // get the web3 name for the senders DID
     let w3n = kilt::get_w3n(&content.sender, &cli)
         .await
         .unwrap_or("".into());
 
-    // construct id_token and refresh_token
+    let sender = &content.sender;
+
+    match authorization_code {
+        None => {
+            redirect_using_implicit_flow(
+                &app_state,
+                &w3n,
+                &sender,
+                props,
+                oidc_context,
+                &client_configs,
+            )
+            .await
+        }
+        Some(code) => {
+            session.insert(AUTHORIZATION_CODE_PROPS, props.clone())?;
+            redirect_using_authorization_code(&code, oidc_context).await
+        }
+    }
+}
+
+async fn redirect_using_implicit_flow(
+    app_state: &web::Data<RwLock<AppState>>,
+    w3n: &str,
+    sender: &str,
+    props: serde_json::Map<String, serde_json::Value>,
+    oidc_context: AuthorizeQueryParameters,
+    client_configs: &HashMap<String, ClientConfig>,
+) -> Result<HttpResponse, Error> {
     let nonce = Some(oidc_context.nonce.clone());
     let mut app_state = app_state.write()?; // may update the rhai checkers
+
+    // construct id_token and refresh_token
     let id_token = app_state
         .jwt_builder
-        .new_id_token(&content.sender, &w3n, &props, &nonce)
+        .new_id_token(&sender, &w3n, &props, &nonce)
         .to_jwt(&app_state.jwt_secret_key, &app_state.jwt_algorithm)
         .map_err(|e| {
             log::error!("Failed to create id token: {}", e);
@@ -269,7 +308,7 @@ async fn post_credential_handler(
 
     let refresh_token = app_state
         .jwt_builder
-        .new_refresh_token(&content.sender, &w3n, &props, &nonce)
+        .new_refresh_token(&sender, &w3n, &props, &nonce)
         .to_jwt(&app_state.jwt_secret_key, &app_state.jwt_algorithm)
         .map_err(|e| {
             log::error!("Failed to create refresh token: {}", e);
@@ -287,7 +326,6 @@ async fn post_credential_handler(
         checker.check(&id_token)?;
     }
 
-    // return the response as a HTTP NoContent, to give the frontend a chance to do the redirect on its own
     Ok(HttpResponse::NoContent()
         .append_header((
             "Location",
@@ -300,4 +338,125 @@ async fn post_credential_handler(
             ),
         ))
         .finish())
+}
+
+async fn redirect_using_authorization_code(
+    authorization_code: &str,
+    oidc_context: AuthorizeQueryParameters,
+) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::NoContent()
+        .append_header((
+            "Location",
+            format!(
+                "{}#code={}&state={}",
+                oidc_context.redirect_uri.clone(),
+                authorization_code,
+                oidc_context.state.clone(),
+            ),
+        ))
+        .finish())
+}
+
+#[post("/api/v1/token")]
+async fn post_token_handler(
+    app_state: web::Data<RwLock<AppState>>,
+    session: Session,
+    body: web::Json<TokenRequestData>,
+) -> Result<HttpResponse, Error> {
+    log::info!("POST token handler");
+    let app_state = app_state.read()?;
+    let auth_data = validate_authorization_code(&app_state, &body.code)?;
+    log::info!("{:?}", auth_data);
+
+    let client_secret = &app_state
+        .client_configs
+        .get(&auth_data.client_id)
+        .ok_or(Error::OauthInvalidClientId)?
+        .client_secret;
+
+    if client_secret.is_none() || body.client_secret != client_secret.clone().unwrap() {
+        return Err(Error::OauthInvalidClientId);
+    }
+
+    let props =
+        match session.get::<serde_json::Map<String, serde_json::Value>>(AUTHORIZATION_CODE_PROPS) {
+            Ok(Some(props)) => props,
+            _ => serde_json::Map::new(),
+        };
+
+    let sender = app_state
+        .encryption_key_uri
+        .split('#')
+        .collect::<Vec<&str>>()
+        .first()
+        .ok_or_else(|| Error::Internal("Invalid Key URI".into()))?
+        .to_owned();
+
+    let cli = kilt::connect(&app_state.kilt_endpoint)
+        .await
+        .map_err(|_| Error::CantConnectToBlockchain)?;
+
+    // get the web3 name for the senders DID
+    let w3n = kilt::get_w3n(&sender, &cli).await.unwrap_or("".into());
+    let tokens =
+        generate_tokens_for_code(&app_state, &w3n, &sender, &Some(auth_data.nonce), &props)?;
+    Ok(HttpResponse::Ok().json(tokens))
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TokenRequestData {
+    pub code: String,
+    #[serde(rename = "clientId")]
+    pub client_id: String,
+    #[serde(rename = "clientSecret")]
+    pub client_secret: String,
+    #[serde(rename = "grantType")]
+    pub grant_type: String,
+    #[serde(rename = "redirectUri")]
+    pub redirect_uri: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct TokenData {
+    #[serde(rename = "accessToken")]
+    access_token: String,
+    #[serde(rename = "refreshToken")]
+    refresh_token: String,
+}
+
+impl TokenData {
+    fn new(access_token: &str, refresh_token: &str) -> Self {
+        Self {
+            access_token: access_token.to_string(),
+            refresh_token: refresh_token.to_string(),
+        }
+    }
+}
+
+fn generate_tokens_for_code(
+    app_state: &RwLockReadGuard<AppState>,
+    w3n: &str,
+    sender: &str,
+    nonce: &Option<String>,
+    props: &serde_json::Map<String, serde_json::Value>,
+) -> Result<TokenData, Error> {
+    let access_token = app_state
+        .jwt_builder
+        .new_id_token(&sender, &w3n, &props, nonce)
+        .to_jwt(&app_state.jwt_secret_key, &app_state.jwt_algorithm)
+        .map_err(|e| {
+            log::error!("Failed to create id token: {}", e);
+            Error::CreateJWT
+        })?;
+
+    let refresh_token = app_state
+        .jwt_builder
+        .new_refresh_token(&sender, &w3n, &props, nonce)
+        .to_jwt(&app_state.jwt_secret_key, &app_state.jwt_algorithm)
+        .map_err(|e| {
+            log::error!("Failed to create refresh token: {}", e);
+            Error::CreateJWT
+        })?;
+
+    Ok(TokenData::new(&access_token, &refresh_token))
 }
